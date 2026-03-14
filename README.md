@@ -1,5 +1,5 @@
 # Color4
-A feature-rich color library for [Retro Gadgets](https://store.steampowered.com/app/1730260/Retro_Gadgets/?l).
+A feature-rich color library for [Retro Gadgets](https://docs.retrogadgets.game/).
 
 ---
 
