@@ -25,6 +25,7 @@ export type Color4 = {
 	Grayscale:  (self: Color4) -> Color4,
 	Invert:     (self: Color4) -> Color4,
 	RotateHue:  (self: Color4, degrees: number) -> Color4,
+	Blend: 		 (self: Color4,blend: Color4,mode: BlendMode,t: number) -> Color4,
 	
 	Complementary:      (self: Color4) -> Color4,
 	Triadic:            (self: Color4) -> (Color4, Color4),
@@ -44,13 +45,33 @@ export type Color4 = {
 	__eq:       (Color4, Color4) -> boolean,
 	__tostring: (Color4) -> string,
 	
-	Convert: (self: Color4) -> any,
+	Convert: (self: Color4) -> color,
+	Clone: (self: Color4) -> Color4,
+	
+	FlatColor: {[string]: Color4},
 }
+
+local BlendMode = {
+	Normal      = "Normal",
+	Multiply    = "Multiply",
+	Screen      = "Screen",
+	Overlay     = "Overlay",
+	SoftLight   = "SoftLight",
+	HardLight   = "HardLight",
+	Difference  = "Difference",
+	Exclusion   = "Exclusion",
+	Darken      = "Darken",
+	Lighten     = "Lighten",
+}
+
+export type BlendMode = "Normal" | "Multiply" | "Screen" | "Overlay" | "SoftLight" | "HardLight" | "Difference" | "Exclusion" | "Darken" | "Lighten"
 
 local floor = math.floor
 local clamp = math.clamp
 local max = math.max
 local min = math.min
+local abs = math.abs
+local sqrt = math.sqrt
 
 local function hue2rgb(p, q, t)
 	if t < 0 then t = t + 1 end
@@ -59,6 +80,13 @@ local function hue2rgb(p, q, t)
 	if t < 1 / 2 then return q end
 	if t < 2 / 3 then return p + (q - p) * (2 / 3 - t) * 6 end
 	return p
+end
+
+local function unpackOther(other)
+	if type(other) == "number" then
+		return other, other, other, other
+	end
+	return other.R, other.G, other.B, other.A
 end
 
 local function rgbToHSV(r, g, b)
@@ -82,6 +110,57 @@ local function rgbToHSV(r, g, b)
 	end
 
 	return h, s, v
+end
+
+local function blendChannel(b, s, mode, t)
+	local result
+
+	if mode == BlendMode.Normal then
+		result = s
+
+	elseif mode == BlendMode.Multiply then
+		result = b * s
+
+	elseif mode == BlendMode.Screen then
+		result = 1 - (1 - b) * (1 - s)
+
+	elseif mode == BlendMode.Overlay then
+		result = b < 0.5
+			and 2 * b * s
+			or  1 - 2 * (1 - b) * (1 - s)
+
+	elseif mode == BlendMode.SoftLight then
+		if s <= 0.5 then
+			result = b - (1 - 2 * s) * b * (1 - b)
+		else
+			local d = b <= 0.25
+				and ((16 * b - 12) * b + 4) * b
+				or  sqrt(b)
+			result = b + (2 * s - 1) * (d - b)
+		end
+
+	elseif mode == BlendMode.HardLight then
+		result = s < 0.5
+			and 2 * b * s
+			or  1 - 2 * (1 - b) * (1 - s)
+
+	elseif mode == BlendMode.Difference then
+		result = abs(b - s)
+
+	elseif mode == BlendMode.Exclusion then
+		result = b + s - 2 * b * s
+
+	elseif mode == BlendMode.Darken then
+		result = min(b, s)
+
+	elseif mode == BlendMode.Lighten then
+		result = max(b, s)
+
+	else
+		result = s
+	end
+
+	return clamp(floor((b * (1 - t) + result * t) * 255), 0, 255)
 end
 
 local function rgbToHSL(r, g, b)
@@ -156,17 +235,33 @@ end
 
 function Color4.FromRGB(r: number, g: number, b: number, a: number?)
 	local self = setmetatable({}, Color4)
-	self.R = r or 255
-	self.G = g or 255
-	self.B = b or 255
-	self.A = a or 255
+	self.R = clamp(r or 255,0,255)
+	self.G = clamp(g or 255,0,255)
+	self.B = clamp(b or 255,0,255)
+	self.A = clamp(a or 255,0,255)
 	return self
 end
 
 function Color4.FromHEX(hex: string)
 	local self = setmetatable({}, Color4)
-	hex = hex:gsub("#", "")
+	
+	if type(hex) ~= "string" then
+		print(string.format("[Color4] Invalid HEX type: expected string, got %s", type(hex)))
+		return Color4.FromRGB(0,0,0)
+	end
 
+	hex = hex:gsub("#","")
+
+	if not hex:match("^[0-9a-fA-F]+$") then
+		print(string.format("[Color4] Invalid HEX characters: %s", hex))
+		return Color4.FromRGB(0,0,0)
+	end
+
+	if #hex ~= 6 and #hex ~= 8 then
+		print(string.format("[Color4] Invalid HEX length (%d): expected 6 or 8", #hex))
+		return Color4.FromRGB(0,0,0)
+	end
+	
 	self.R = tonumber(hex:sub(1, 2), 16)
 	self.G = tonumber(hex:sub(3, 4), 16)
 	self.B = tonumber(hex:sub(5, 6), 16)
@@ -305,11 +400,16 @@ function Color4.Lerp(self, other, t: number)
 	return result
 end
 
-local function unpackOther(other)
-	if type(other) == "number" then
-		return other, other, other, other
-	end
-	return other.R, other.G, other.B, other.A
+function Color4.Blend(base, blend, mode: string?, t: number?)
+	local m = mode or BlendMode.Normal
+	local t = clamp(t or 1, 0, 1)
+
+	return Color4.FromRGB(
+		blendChannel(base.R / 255, blend.R / 255, m, t),
+		blendChannel(base.G / 255, blend.G / 255, m, t),
+		blendChannel(base.B / 255, blend.B / 255, m, t),
+		base.A
+	)
 end
 
 function Color4.__add(a, b)
@@ -402,5 +502,86 @@ end
 function Color4:Convert()
 	return ColorRGBA(self.R, self.G, self.B, self.A)
 end
+
+function Color4:Clone()
+		local clone = setmetatable({},Color4)
+		
+		clone.R = self.R
+		clone.G = self.G
+		clone.B = self.B
+		clone.A = self.A
+		
+		return clone
+end
+
+local FlatColors = {
+	["White"] = Color4.FromRGB(255,255,255),
+	["Black"] = Color4.FromRGB(0,0,0),
+	["Gray"] = Color4.FromRGB(128,128,128),
+	["Light Gray"] = Color4.FromRGB(200,200,200),
+	["Dark Gray"] = Color4.FromRGB(64,64,64),
+
+	["Red"] = Color4.FromRGB(255,0,0),
+	["Green"] = Color4.FromRGB(0,255,0),
+	["Blue"] = Color4.FromRGB(0,0,255),
+
+	["Yellow"] = Color4.FromRGB(255,255,0),
+	["Orange"] = Color4.FromRGB(255,165,0),
+	["Purple"] = Color4.FromRGB(128,0,128),
+	["Pink"] = Color4.FromRGB(255,192,203),
+
+	["Cyan"] = Color4.FromRGB(0,255,255),
+	["Magenta"] = Color4.FromRGB(255,0,255),
+	["Lime"] = Color4.FromRGB(50,205,50),
+	["Teal"] = Color4.FromRGB(0,128,128),
+
+	["Brown"] = Color4.FromRGB(139,69,19),
+	["Olive"] = Color4.FromRGB(128,128,0),
+	["Navy"] = Color4.FromRGB(0,0,128),
+	
+	["Bright red"] = Color4.FromRGB(196,40,28),
+	["Medium red"] = Color4.FromRGB(218,134,122),
+	["Bright blue"] = Color4.FromRGB(13,105,172),
+	["Bright yellow"] = Color4.FromRGB(245,205,48),
+	["Bright green"] = Color4.FromRGB(75,151,75),
+
+	["Institutional white"] = Color4.FromRGB(248,248,248),
+	["Really black"] = Color4.FromRGB(17,17,17),
+	["Really red"] = Color4.FromRGB(255,0,0),
+	["Really blue"] = Color4.FromRGB(0,0,255),
+
+	["Lime green"] = Color4.FromRGB(0,255,0),
+	["Lavender"] = Color4.FromRGB(140,91,159),
+	["Hot pink"] = Color4.FromRGB(255,0,191),
+
+	["Pastel yellow"] = Color4.FromRGB(255,255,204),
+	["Pastel orange"] = Color4.FromRGB(255,204,153),
+	["Pastel violet"] = Color4.FromRGB(204,153,255),
+
+	["Royal purple"] = Color4.FromRGB(98,37,209),
+	["Navy blue"] = Color4.FromRGB(0,32,96),
+
+	["Bright orange"] = Color4.FromRGB(218,133,65),
+	["Bright violet"] = Color4.FromRGB(107,50,124),
+	["Bright bluish green"] = Color4.FromRGB(0,143,156),
+	["Bright yellowish green"] = Color4.FromRGB(164,189,71),
+	["Bright yellowish orange"] = Color4.FromRGB(226,155,64),
+
+	["Neon orange"] = Color4.FromRGB(213,115,61)
+}
+
+Color4.FlatColor = setmetatable({}, {
+	__index = function(_, name: string)
+		local preset = FlatColors[name]
+		if not preset then
+			print(string.format("[Color4.FlatColor] Unknown color: '%s'", name))
+			return Color4.FromRGB(0, 0, 0)
+		end
+		return preset:Clone()
+	end,
+	__newindex = function()
+		print("[Color4.FlatColor] FlatColor is read-only")
+	end,
+}) 
 
 return Color4 :: Color4
