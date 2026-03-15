@@ -17,7 +17,8 @@ type Color4 = Color4.Color4
 ## Constructors
 
 ### `Color4.FromRGB(r, g, b, a?)`
-Creates a color from red, green, blue and optional alpha channels.
+Creates a color from red, green, blue and optional alpha channels.  
+All values are clamped to `0–255` automatically.
 - `r`, `g`, `b` — `0–255`
 - `a` — `0–255`, defaults to `255`
 
@@ -29,7 +30,8 @@ local colorWithAlpha = Color4.FromRGB(255, 80, 0, 128)
 ---
 
 ### `Color4.FromHEX(hex)`
-Creates a color from a HEX string. Supports both 6-character (`#RRGGBB`) and 8-character (`#RRGGBBAA`) formats.
+Creates a color from a HEX string. Supports both 6-character (`#RRGGBB`) and 8-character (`#RRGGBBAA`) formats.  
+Prints an error and returns black if the string is invalid.
 
 ```lua
 local color = Color4.FromHEX("#FF5000")
@@ -170,9 +172,38 @@ local rotated = color:RotateHue(90)
 
 ---
 
+## Blend
+
+### `Color4.Blend(base, blend, mode?, t?)` / `base:Blend(blend, mode?, t?)`
+Blends two colors using a Photoshop-style blend mode.
+- `mode` — a `BlendMode` value, defaults to `"Normal"`
+- `t` — opacity of the blend layer `0–1`, defaults to `1`
+
+```lua
+local result = Color4.Blend(base, overlay, Color4.BlendMode.Overlay)
+local result = base:Blend(overlay, Color4.BlendMode.Screen, 0.5)
+```
+
+**Available blend modes via `Color4.BlendMode`:**
+
+| Mode | Description |
+|---|---|
+| `Normal` | Replaces base with blend (respects `t`) |
+| `Multiply` | Multiplies channels — darkens |
+| `Screen` | Inverse Multiply — lightens |
+| `Overlay` | Multiply for darks, Screen for lights |
+| `SoftLight` | Softer version of Overlay |
+| `HardLight` | Overlay with layers swapped |
+| `Difference` | Absolute difference — inverts at white |
+| `Exclusion` | Softer version of Difference |
+| `Darken` | Keeps the minimum of each channel |
+| `Lighten` | Keeps the maximum of each channel |
+
+---
+
 ## Harmony
 
-All harmony methods return new `Color4` instances with the same Saturation, Value and Alpha as the source color, only the Hue is offset.
+All harmony methods return new `Color4` instances with the same Saturation, Value and Alpha as the source color — only the Hue is offset.
 
 ### `color:Complementary()` → `Color4`
 Returns the color directly opposite on the color wheel (Hue + 180°).
@@ -236,6 +267,44 @@ local mid = red:Lerp(blue, 0.5)          -- colon syntax
 
 ---
 
+## Utilities
+
+### `color:Clone()` → `Color4`
+Returns a new `Color4` instance with identical channel values.
+
+```lua
+local copy = color:Clone()
+```
+
+---
+
+## FlatColor
+
+A read-only preset palette. Every access automatically returns a **fresh clone** of the preset, so modifying the returned color never affects the original.
+
+```lua
+local red  = Color4.FlatColor.Red
+local cyan = Color4.FlatColor["Cyan"]
+```
+
+Accessing an unknown name prints a warning and returns black.
+
+**Available presets:**
+
+| Group | Names |
+|---|---|
+| Neutrals | `White`, `Black`, `Gray`, `Light Gray`, `Dark Gray` |
+| Primary | `Red`, `Green`, `Blue` |
+| Secondary | `Yellow`, `Orange`, `Purple`, `Pink`, `Cyan`, `Magenta` |
+| Natural | `Lime`, `Teal`, `Brown`, `Olive`, `Navy` |
+| Bright | `Bright red`, `Bright blue`, `Bright yellow`, `Bright green`, `Medium red` |
+| Vivid | `Really red`, `Really blue`, `Really black`, `Institutional white` |
+| Pastel | `Pastel yellow`, `Pastel orange`, `Pastel violet` |
+| Special | `Lime green`, `Lavender`, `Hot pink`, `Royal purple`, `Navy blue`, `Neon orange` |
+| Extended | `Bright orange`, `Bright violet`, `Bright bluish green`, `Bright yellowish green`, `Bright yellowish orange` |
+
+---
+
 ## Engine
 
 ### `color:Convert()`
@@ -287,7 +356,7 @@ end
 ### `tostring`
 
 ```lua
-tostring(color)  -- "rgba(255, 80, 0, 255)"
+tostring(color)  -- "Color4(255, 80, 0, 255)"
 ```
 
 ---
